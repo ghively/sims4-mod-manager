@@ -85,7 +85,13 @@ class FindTab(QWidget):
             self._status_label.setText(str(exc))
             return
 
-        result = self._context.install_coordinator.install(downloaded_path)
+        try:
+            result = self._context.install_coordinator.install(downloaded_path)
+        except Exception as exc:
+            self._status_label.setText(
+                f"Something went wrong installing this file: {exc}"
+            )
+            return
         self._status_label.setText(_describe_install_result(result))
 
 
