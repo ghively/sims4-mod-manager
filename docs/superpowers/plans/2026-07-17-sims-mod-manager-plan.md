@@ -2002,7 +2002,223 @@ git commit -m "chore: ignore PyInstaller build output"
 
 ---
 
-### Task 17: Manual end-to-end verification pass
+### Task 17: Activity Log tab
+
+**Files:**
+- Create: `sims_mod_manager/gui/activity_tab.py`
+- Modify: `sims_mod_manager/gui/main_window.py` (add `store` to `AppContext`, add a third tab)
+
+**Interfaces:**
+- Consumes: `ModStore.get_activity_log(self) -> list[dict]` (Task 4).
+- Produces: `class ActivityTab(QWidget): __init__(self, context)` — used by `MainWindow`.
+
+**Why this task exists:** the final whole-branch review found that `ModStore.get_activity_log()` was implemented and tested but never surfaced anywhere in the app — the spec's error-handling section promises install history is "recorded in-app so mistakes are traceable," but "traceable" meant "sitting in a SQLite file" with no UI. This task closes that gap with a simple read-only table.
+
+No automated tests (GUI code, per this project's testing approach). Manually verified via an offscreen smoke test in Step 3.
+
+- [ ] **Step 1: Add `store` to `AppContext`**
+
+In `sims_mod_manager/gui/main_window.py`, add a `store: ModStore` field to the `AppContext` dataclass:
+```python
+@dataclass
+class AppContext:
+    staging_dir: Path
+    downloads_dir: Path
+    install_coordinator: InstallCoordinator
+    store: ModStore
+```
+And pass it when constructing `context` in `MainWindow.__init__` (the `store` variable already exists there, constructed just above `install_coordinator`):
+```python
+context = AppContext(
+    staging_dir=config.get_staging_dir(),
+    downloads_dir=config.get_downloads_dir(),
+    install_coordinator=install_coordinator,
+    store=store,
+)
+```
+
+- [ ] **Step 2: Write `activity_tab.py`**
+
+`sims_mod_manager/gui/activity_tab.py`:
+```python
+"""Read-only view of what's been installed, sourced from the local ModStore."""
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHeaderView,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+_COLUMNS = ("Filename", "Category", "Source", "Installed Path", "Installed At")
+
+
+class ActivityTab(QWidget):
+    def __init__(self, context):
+        super().__init__()
+        self._context = context
+
+        self._table = QTableWidget(0, len(_COLUMNS))
+        self._table.setHorizontalHeaderLabels(_COLUMNS)
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+        refresh_button = QPushButton("Refresh")
+        refresh_button.clicked.connect(self.refresh)
+
+        layout = QVBoxLayout()
+        layout.addWidget(refresh_button)
+        layout.addWidget(self._table)
+        self.setLayout(layout)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        entries = self._context.store.get_activity_log()
+        self._table.setRowCount(len(entries))
+        for row, entry in enumerate(entries):
+            self._table.setItem(row, 0, QTableWidgetItem(entry["filename"]))
+            self._table.setItem(row, 1, QTableWidgetItem(entry["category"]))
+            self._table.setItem(row, 2, QTableWidgetItem(entry["source"]))
+            self._table.setItem(row, 3, QTableWidgetItem(entry["installed_path"]))
+            self._table.setItem(row, 4, QTableWidgetItem(entry["installed_at"]))
+
+    def showEvent(self, event) -> None:
+        self.refresh()
+        super().showEvent(event)
+```
+
+- [ ] **Step 3: Wire the third tab into `MainWindow` and smoke-test**
+
+In `main_window.py`, import `ActivityTab` and add it as a third tab:
+```python
+from sims_mod_manager.gui.activity_tab import ActivityTab
+...
+tabs.addTab(ActivityTab(context), "Activity")
+```
+
+Offscreen smoke test (no real display needed, matching Tasks 14/15's approach): construct `ActivityTab` with a fake `context` object whose `.store.get_activity_log()` returns a canned list of 2-3 dict entries (matching the shape `ModStore.get_activity_log()` actually returns), confirm the table populates with the right row count and cell values; also test with an empty list (0 rows, no crash); confirm clicking "Refresh" re-queries `get_activity_log()` (e.g. have the fake return a different list on the second call and confirm the table updates).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add sims_mod_manager/gui/activity_tab.py sims_mod_manager/gui/main_window.py
+git commit -m "feat: add read-only Activity Log tab"
+```
+
+---
+
+### Task 18: Background install with progress feedback
+
+**Files:**
+- Modify: `sims_mod_manager/core/store.py` (allow cross-thread use)
+- Create: `sims_mod_manager/gui/install_worker.py`
+- Modify: `sims_mod_manager/gui/find_tab.py` (run install on the worker, show progress)
+- Modify: `sims_mod_manager/gui/inbox_tab.py` (same)
+
+**Interfaces:**
+- Consumes: `InstallCoordinator.install(self, source_path: Path) -> InstallResult` (Task 13).
+- Produces: `class InstallWorker(QThread)` with `succeeded = Signal(object)` (carries `InstallResult`) and `failed = Signal(str)` — used by `find_tab.py`/`inbox_tab.py`.
+
+**Why this task exists:** installs currently run synchronously on the GUI thread inside `_on_link_submitted`/`_on_install_clicked`. For a small CC file this is instant, but larger mod packs (some Sims 4 CC bundles run into the hundreds of MB) would freeze the window with no feedback for however long extraction/copy takes — exactly the "does it look like it's hanging?" concern a non-technical user would hit. This task moves the actual install call to a background thread and shows a busy indicator while it runs, so the window stays responsive and the user can see something is happening.
+
+No automated tests for the GUI wiring (per this project's approach), but `store.py`'s change gets a real test since it's core logic. Manually verified via an offscreen smoke test in Step 4.
+
+- [ ] **Step 1: Write the failing test for thread-safe store access**
+
+Add to `tests/test_store.py`:
+```python
+def test_store_usable_from_a_different_thread(tmp_path):
+    import threading
+
+    store = ModStore(tmp_path / "store.db")
+    errors = []
+
+    def _use_from_thread():
+        try:
+            store.record_install(
+                source="C:/Downloads/mod.zip",
+                filename="mod.package",
+                category="CAS",
+                file_hash="fromthread",
+                installed_path="C:/Mods/CAS/mod.package",
+            )
+        except Exception as exc:  # sqlite3.ProgrammingError if check_same_thread wasn't disabled
+            errors.append(exc)
+
+    thread = threading.Thread(target=_use_from_thread)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert errors == []
+    assert store.is_duplicate("fromthread") is True
+    store.close()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_store.py::test_store_usable_from_a_different_thread -v`
+Expected: FAIL with `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread...`
+
+- [ ] **Step 3: Make the store thread-safe and verify**
+
+In `sims_mod_manager/core/store.py`, change the connection line in `ModStore.__init__`:
+```python
+self._conn = sqlite3.connect(db_path, check_same_thread=False)
+```
+This is safe here because the app only ever runs one install at a time — `find_tab.py`/`inbox_tab.py` (this task, steps below) disable their trigger controls while a worker thread is active, so there's never concurrent access from two different threads simultaneously, only sequential access from whichever single thread happens to be running at that moment.
+
+Run: `pytest tests/test_store.py -v`
+Expected: PASS, including the new test. Then run the full suite once (`pytest -v`) to confirm no regressions.
+
+- [ ] **Step 4: Write `install_worker.py` and wire it into both tabs**
+
+`sims_mod_manager/gui/install_worker.py`:
+```python
+"""Runs an install on a background thread so the GUI stays responsive."""
+from pathlib import Path
+
+from PySide6.QtCore import QThread, Signal
+
+
+class InstallWorker(QThread):
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, install_coordinator, source_path: Path):
+        super().__init__()
+        self._install_coordinator = install_coordinator
+        self._source_path = source_path
+
+    def run(self) -> None:
+        try:
+            result = self._install_coordinator.install(self._source_path)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.succeeded.emit(result)
+```
+
+In `find_tab.py`: add a `QProgressBar` (indeterminate: `setRange(0, 0)`), hidden by default, to the layout. In `_on_link_submitted`, after a successful `download_file(...)` call, instead of calling `self._context.install_coordinator.install(downloaded_path)` directly and wrapping it in try/except as it does now, construct an `InstallWorker(self._context.install_coordinator, downloaded_path)`, keep it on `self._worker` (required — a `QThread` with no surviving Python reference can be garbage-collected mid-run, crashing the app), disable the "Go" button, show the progress bar, connect `succeeded` to a slot that hides the progress bar, re-enables the button, and sets the status label via the existing `_describe_install_result(result)`, and connect `failed` to a slot that does the same but sets the status label to `f"Something went wrong installing this file: {message}"` (same message shape as the current except-block). Call `self._worker.start()` to kick it off. Remove the now-redundant `try/except Exception` around the install call, since `InstallWorker` catches it and reports via the `failed` signal instead.
+
+Apply the same pattern to `inbox_tab.py`'s `_on_install_clicked`: construct the worker, disable the "Install selected" button, show a progress bar, and on `succeeded`/`failed` do the existing status-label-and-list-item-removal logic (remove the item only on the success/duplicate paths, same as today), then re-enable the button and hide the progress bar.
+
+- [ ] **Step 5: Offscreen smoke test**
+
+No real display needed. For `find_tab.py`: construct `FindTab` with a fake context whose `install_coordinator.install` is a plain function (not literally threaded, just callable) that either returns a canned `InstallResult`-like object or raises — since `InstallWorker` wraps whatever `install_coordinator.install` does in a real `QThread`, you can test this with a REAL `InstallWorker` and a fake `install_coordinator`, running a real `QApplication` event loop (`app.processEvents()` in a bounded polling loop, not a fixed sleep) until the `succeeded`/`failed` signal fires, and confirm: the progress bar becomes visible when the worker starts and hidden when it finishes; the button is disabled while running and re-enabled after; the status label ends up correct for both the success and the raising case. Repeat the same shape of test for `inbox_tab.py`'s install button. Do not commit this smoke-test script — run it ad hoc and describe results in your report.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add sims_mod_manager/core/store.py tests/test_store.py sims_mod_manager/gui/install_worker.py sims_mod_manager/gui/find_tab.py sims_mod_manager/gui/inbox_tab.py
+git commit -m "feat: run installs on a background thread with progress feedback"
+```
+
+---
+
+### Task 19: Manual end-to-end verification pass
 
 No new files — this is the spec's "Testing approach" manual pass, done once against the fully assembled app before considering it done.
 
@@ -2040,6 +2256,10 @@ Record the outcome of each step (pass/fail + notes) in the PR description or com
 
 ## Self-Review Notes
 
-- **Spec coverage:** Find tab (Task 9, 10, 14) ✓; Inbox/install pipeline — extract/flatten/categorize/dedupe (Tasks 2-6) ✓; backups (Task 7) ✓; settings toggle with fallback (Task 8) ✓; error handling (extraction failures, ambiguous categorization, duplicates, missing `Options.ini`, watcher false positives, activity log — all in Tasks 4-8, 12) ✓; testing approach (unit tests for `core/*`, manual pass for GUI — Task 17) ✓; packaging as single `.exe` (Task 16) ✓; no CurseForge API / no MTS scraping (Task 9's design) ✓.
-- **Placeholder scan:** no TBD/TODO markers; the one open item (`Options.ini` key names) is called out explicitly with a concrete fallback behavior and a concrete verification step (Task 8's note, Task 17 Step 6), not left vague.
+- **Spec coverage:** Find tab (Task 9, 10, 14) ✓; Inbox/install pipeline — extract/flatten/categorize/dedupe (Tasks 2-6) ✓; backups (Task 7) ✓; settings toggle with fallback (Task 8) ✓; error handling (extraction failures, ambiguous categorization, duplicates, missing `Options.ini`, watcher false positives, activity log — all in Tasks 4-8, 12) ✓; testing approach (unit tests for `core/*`, manual pass for GUI — Task 19) ✓; packaging as single `.exe` (Task 16) ✓; no CurseForge API / no MTS scraping (Task 9's design) ✓.
+- **Placeholder scan:** no TBD/TODO markers; the one open item (`Options.ini` key names) is called out explicitly with a concrete fallback behavior and a concrete verification step (Task 8's note, Task 19 Step 6), not left vague.
 - **Type consistency:** `InstallResult`, `ModStore`, `SettingsToggleResult`, `DownloadsWatcher`, `AppContext`, `InstallCoordinator` are defined once each and referenced with matching names/signatures across every consuming task.
+
+## Addendum (post-final-review additions)
+
+Tasks 17 and 18 were added after a final whole-branch review of Tasks 1-16 (see `.superpowers/sdd/progress.md` for the full history) found two things worth building rather than just noting: the activity log existed in the database but was never shown in the app, and installs ran synchronously on the GUI thread with no feedback for large mod packs. Two Important bugs from that same review (categorizer absolute-path leak; `get_downloads_dir()` missing the Known Folder API fix) were fixed directly against Tasks 6 and 1 respectively rather than as new tasks, since they were corrections to existing code, not new functionality — see the ledger for those commits.
