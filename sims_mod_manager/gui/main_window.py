@@ -13,6 +13,7 @@ from sims_mod_manager.core.settings_toggle import (
     enable_mods_and_script_mods,
 )
 from sims_mod_manager.core.store import ModStore
+from sims_mod_manager.gui.activity_tab import ActivityTab
 from sims_mod_manager.gui.find_tab import FindTab
 from sims_mod_manager.gui.inbox_tab import InboxTab
 
@@ -45,6 +46,7 @@ class AppContext:
     staging_dir: Path
     downloads_dir: Path
     install_coordinator: InstallCoordinator
+    store: ModStore
 
 
 class MainWindow(QMainWindow):
@@ -65,6 +67,7 @@ class MainWindow(QMainWindow):
             staging_dir=config.get_staging_dir(),
             downloads_dir=config.get_downloads_dir(),
             install_coordinator=install_coordinator,
+            store=store,
         )
 
         tabs = QTabWidget()
@@ -72,6 +75,7 @@ class MainWindow(QMainWindow):
         inbox_tab = InboxTab(context)
         tabs.addTab(inbox_tab, "Inbox")
         self._inbox_tab = inbox_tab
+        tabs.addTab(ActivityTab(context), "Activity")
         self.setCentralWidget(tabs)
 
         self._maybe_show_settings_reminder()
