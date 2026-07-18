@@ -47,3 +47,22 @@ def test_documents_dir_falls_back_to_home_on_known_folder_failure(tmp_path, monk
 def test_sims4_dir_composes_on_top_of_documents_dir(monkeypatch):
     monkeypatch.setattr(config, "get_documents_dir", lambda: Path(r"D:\Redirected\Documents"))
     assert config.get_sims4_dir() == Path(r"D:\Redirected\Documents") / "Electronic Arts" / "The Sims 4"
+
+
+def test_downloads_dir_uses_known_folder_api_result(monkeypatch):
+    def _fake_query(folder_id):
+        if folder_id == config._FOLDERID_DOWNLOADS:
+            return r"D:\Redirected\Downloads"
+        raise AssertionError(f"unexpected folder_id: {folder_id!r}")
+
+    monkeypatch.setattr(config, "_query_known_folder_path", _fake_query)
+    assert config.get_downloads_dir() == Path(r"D:\Redirected\Downloads")
+
+
+def test_downloads_dir_falls_back_to_home_on_known_folder_failure(tmp_path, monkeypatch):
+    def _raise(folder_id):
+        raise OSError("known folder lookup failed")
+
+    monkeypatch.setattr(config, "_query_known_folder_path", _raise)
+    monkeypatch.setattr(config.Path, "home", lambda: tmp_path)
+    assert config.get_downloads_dir() == tmp_path / "Downloads"

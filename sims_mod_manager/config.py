@@ -9,6 +9,10 @@ from pathlib import Path
 # redirected, e.g. via OneDrive Known Folder Move) "Documents" folder.
 _FOLDERID_DOCUMENTS = "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}"
 
+# FOLDERID_Downloads -- the Windows Known Folder GUID for the (possibly
+# redirected, e.g. via OneDrive Known Folder Move) "Downloads" folder.
+_FOLDERID_DOWNLOADS = "{374DE290-123F-4565-9164-39C4925E467B}"
+
 
 def _query_known_folder_path(folder_id: str) -> str:
     """Call SHGetKnownFolderPath for `folder_id` and return the resolved path.
@@ -61,6 +65,20 @@ def get_documents_dir() -> Path:
         return Path.home() / "Documents"
 
 
+def get_downloads_dir() -> Path:
+    """Resolve the real Windows "Downloads" known folder.
+
+    This accounts for redirection (e.g. OneDrive Known Folder Move), which
+    can place Downloads somewhere other than %USERPROFILE%\\Downloads. Falls
+    back to Path.home() / "Downloads" if the Known Folder API call fails, so
+    the app never hard-crashes over this.
+    """
+    try:
+        return Path(_query_known_folder_path(_FOLDERID_DOWNLOADS))
+    except OSError:
+        return Path.home() / "Downloads"
+
+
 def get_sims4_dir() -> Path:
     return get_documents_dir() / "Electronic Arts" / "The Sims 4"
 
@@ -101,7 +119,3 @@ def get_staging_dir() -> Path:
     staging_dir = get_app_data_dir() / "staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
     return staging_dir
-
-
-def get_downloads_dir() -> Path:
-    return Path.home() / "Downloads"
