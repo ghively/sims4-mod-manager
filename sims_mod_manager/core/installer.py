@@ -56,8 +56,20 @@ def install_mod_file(
             result.errors.append(str(exc))
             return result
         mod_files = find_mod_files(item_staging_dir)
+
+        def _categorization_path(mod_file: Path) -> Path:
+            # Only the archive's own internal folder structure and filename
+            # should feed into categorization -- not the staging dir's
+            # absolute prefix (which may contain the user's home directory).
+            return mod_file.relative_to(item_staging_dir)
     elif suffix in _DIRECT_MOD_SUFFIXES:
         mod_files = [source_path]
+
+        def _categorization_path(mod_file: Path) -> Path:
+            # A lone dropped-in file has no meaningful containing-folder
+            # signal, so categorize on the filename alone -- never leak the
+            # absolute Downloads path's prefix into categorization.
+            return Path(mod_file.name)
     else:
         result.errors.append(f"Not a recognized mod file: {source_path.name}")
         return result
@@ -72,7 +84,7 @@ def install_mod_file(
             result.duplicates.append(mod_file)
             continue
 
-        category = categorize_file(mod_file)
+        category = categorize_file(_categorization_path(mod_file))
         category_dir = mods_dir / category
         category_dir.mkdir(parents=True, exist_ok=True)
         target_path = _resolve_collision(category_dir / mod_file.name)

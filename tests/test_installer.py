@@ -136,3 +136,57 @@ def test_archive_with_no_mod_files_produces_error(tmp_path):
     assert result.installed == []
     assert len(result.errors) == 1
     store.close()
+
+
+def test_categorization_ignores_staging_dir_absolute_path_for_archives(tmp_path):
+    # Regression test: categorize_file() matches on substrings, so an
+    # absolute staging path containing a keyword-colliding folder name (e.g.
+    # a Windows username like "Cassidy" or a system folder like this one,
+    # "castle_user", both contain "cas") must NOT leak into categorization.
+    # Only the archive's own internal folder structure and filename should
+    # be considered. The file itself ("SomeFolder/plain.package") has no
+    # CAS/Build-Buy/Gameplay keywords, so it should end up Uncategorized --
+    # not CAS, which is what the bug would produce.
+    downloads_dir = tmp_path / "downloads"
+    downloads_dir.mkdir()
+    zip_path = downloads_dir / "plain_mod.zip"
+    _make_zip(zip_path, {"SomeFolder/plain.package": "data"})
+
+    mods_dir = tmp_path / "Mods"
+    # Deliberately keyword-colliding staging path: "castle_user" contains "cas".
+    staging_dir = tmp_path / "castle_user" / "downloads"
+    store = ModStore(tmp_path / "store.db")
+
+    result = install_mod_file(zip_path, mods_dir, store, staging_dir)
+
+    assert len(result.installed) == 1
+    assert result.installed[0].name == "plain.package"
+    assert result.installed[0].parent.name == "Uncategorized"
+    assert result.installed[0].exists()
+    assert result.errors == []
+    store.close()
+
+
+def test_categorization_ignores_containing_folder_for_direct_files(tmp_path):
+    # Same regression, but for a direct (non-archive) mod file dropped
+    # straight into a folder whose absolute path collides with a keyword
+    # (again "cas" via "castle_user"). Only the filename itself should be
+    # used for categorization, so a keyword-free filename must be
+    # Uncategorized rather than CAS.
+    downloads_dir = tmp_path / "castle_user" / "downloads"
+    downloads_dir.mkdir(parents=True)
+    package_path = downloads_dir / "plain.package"
+    package_path.write_bytes(b"data")
+
+    mods_dir = tmp_path / "Mods"
+    staging_dir = tmp_path / "staging"
+    store = ModStore(tmp_path / "store.db")
+
+    result = install_mod_file(package_path, mods_dir, store, staging_dir)
+
+    assert len(result.installed) == 1
+    assert result.installed[0].name == "plain.package"
+    assert result.installed[0].parent.name == "Uncategorized"
+    assert result.installed[0].exists()
+    assert result.errors == []
+    store.close()
