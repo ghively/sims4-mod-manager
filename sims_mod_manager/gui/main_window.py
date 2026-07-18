@@ -1,5 +1,6 @@
 """Top-level window: tabs sharing one AppContext, plus the one-time
 settings toggle and the once-per-session backup safety net."""
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,12 +34,35 @@ class InstallCoordinator:
         self._sims4_dir = sims4_dir
         self._backup_dir = backup_dir
         self._backed_up_this_session = False
+        # Both FindTab and InboxTab share this one InstallCoordinator (via
+        # AppContext), each driving it from its own background
+        # InstallWorker QThread. Without a lock here, two installs
+        # triggered from the two different tabs at nearly the same moment
+        # could run concurrently on two different threads:
+        #   - both could observe _backed_up_this_session as False and both
+        #     call backup_mod_folders(...) concurrently (a non-atomic
+        #     check-then-set on a plain bool), and/or
+        #   - both could resolve a filename collision in
+        #     install_mod_file()'s _resolve_collision() via its unguarded
+        #     exists()-then-copy TOCTOU check, land on the same "free"
+        #     target path, and have one shutil.copy2() silently clobber
+        #     the other's file -- a direct violation of this app's "never
+        #     silently overwrite a file" rule.
+        # This lock makes the whole install() call (backup-if-needed +
+        # extract/categorize/copy/record) fully mutually exclusive across
+        # any thread that calls it, closing both races at the exact point
+        # the unsafe operations happen. It's only ever acquired from
+        # within InstallWorker.run(), which already runs off the GUI
+        # thread, so a second install blocking on this lock does not
+        # freeze the window -- it just waits its turn.
+        self._lock = threading.Lock()
 
     def install(self, source_path: Path) -> InstallResult:
-        if not self._backed_up_this_session:
-            backup_mod_folders(self._sims4_dir, self._backup_dir)
-            self._backed_up_this_session = True
-        return install_mod_file(source_path, self._mods_dir, self._store, self._staging_dir)
+        with self._lock:
+            if not self._backed_up_this_session:
+                backup_mod_folders(self._sims4_dir, self._backup_dir)
+                self._backed_up_this_session = True
+            return install_mod_file(source_path, self._mods_dir, self._store, self._staging_dir)
 
 
 @dataclass

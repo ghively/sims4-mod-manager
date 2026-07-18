@@ -70,8 +70,17 @@ def test_store_survives_concurrent_writes_from_many_threads(tmp_path):
     errors = []
     thread_count = 8
 
+    # A Barrier holds every writer thread at the gate until all of them are
+    # ready, so they all call execute()/commit() at (as close to) the same
+    # instant -- rather than each thread running its single statement and
+    # finishing well before the next one is even scheduled, which is not
+    # decisive proof of anything since Python's bundled SQLite is often
+    # already internally serialized regardless of the app-level lock.
+    barrier = threading.Barrier(thread_count + 1)  # +1 for the reader thread below
+
     def _record(index: int) -> None:
         try:
+            barrier.wait(timeout=5)
             store.record_install(
                 source="C:/Downloads/mod.zip",
                 filename=f"mod{index}.package",
@@ -83,11 +92,30 @@ def test_store_survives_concurrent_writes_from_many_threads(tmp_path):
             # without a lock serializing access, or connection corruption
             errors.append(exc)
 
+    # A reader thread that hammers get_activity_log() *while* the writer
+    # threads are still in flight (not after they've all joined) mirrors
+    # the real ActivityTab-vs-InstallWorker scenario: ActivityTab.refresh()
+    # can be called from the GUI thread at any moment, including mid-install.
+    stop_reading = threading.Event()
+
+    def _read_repeatedly() -> None:
+        try:
+            barrier.wait(timeout=5)
+            while not stop_reading.is_set():
+                store.get_activity_log()
+        except Exception as exc:  # sqlite3.OperationalError ("database is locked")
+            errors.append(exc)
+
     threads = [threading.Thread(target=_record, args=(i,)) for i in range(thread_count)]
+    reader = threading.Thread(target=_read_repeatedly)
+
+    reader.start()
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(timeout=5)
+    stop_reading.set()
+    reader.join(timeout=5)
 
     assert errors == []
     log = store.get_activity_log()
