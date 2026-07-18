@@ -46,3 +46,24 @@ def test_disabled_values_get_flipped_on(tmp_path):
     assert "scriptmodsenabled=1" in updated
     assert "modsdisabled=0" in updated
     assert "othersetting=5" in updated
+
+
+def test_preserves_crlf_line_endings(tmp_path):
+    """Verify that rewritten lines preserve the original CRLF line endings."""
+    options_ini_path = tmp_path / "Options.ini"
+    original_content = "scriptmodsenabled=0\r\nmodsdisabled=1\r\nothersetting=5\r\n"
+    # Write with newline="" to prevent Python from translating \r\n to \n on Windows
+    with open(options_ini_path, "w", encoding="utf-8", newline="") as f:
+        f.write(original_content)
+
+    result = enable_mods_and_script_mods(options_ini_path)
+
+    assert result == SettingsToggleResult.APPLIED
+    # Read with newline="" to prevent translation and see actual line endings
+    with open(options_ini_path, "r", encoding="utf-8", newline="") as f:
+        updated = f.read()
+
+    # Verify the rewritten lines have \r\n, not just \n
+    assert "scriptmodsenabled=1\r\n" in updated
+    assert "modsdisabled=0\r\n" in updated
+    assert "othersetting=5\r\n" in updated

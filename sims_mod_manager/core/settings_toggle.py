@@ -29,17 +29,19 @@ def enable_mods_and_script_mods(options_ini_path: Path) -> SettingsToggleResult:
     new_lines = []
 
     for line in lines:
-        match = _KEY_LINE_PATTERN.match(line.strip("\r\n"))
+        stripped = line.strip("\r\n")
+        terminator = line[len(stripped):]
+        match = _KEY_LINE_PATTERN.match(stripped)
         if match and match.group("key").lower() == _SCRIPT_MODS_KEY:
             found_script_mods = True
             if match.group("value") != "1":
-                new_lines.append(f"{_SCRIPT_MODS_KEY}=1\n")
+                new_lines.append(f"{_SCRIPT_MODS_KEY}=1{terminator}")
                 changed = True
                 continue
         elif match and match.group("key").lower() == _MODS_DISABLED_KEY:
             found_mods_disabled = True
             if match.group("value") != "0":
-                new_lines.append(f"{_MODS_DISABLED_KEY}=0\n")
+                new_lines.append(f"{_MODS_DISABLED_KEY}=0{terminator}")
                 changed = True
                 continue
         new_lines.append(line)
