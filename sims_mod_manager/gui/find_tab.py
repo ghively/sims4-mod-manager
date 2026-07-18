@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from sims_mod_manager.core.downloader import DownloadError, download_file
 from sims_mod_manager.core.link_router import LinkAction, classify_link
 from sims_mod_manager.core.search_launcher import (
     SITE_BOTH,
@@ -20,7 +19,7 @@ from sims_mod_manager.core.search_launcher import (
     SITE_MODTHESIMS,
     open_search,
 )
-from sims_mod_manager.gui.install_worker import InstallWorker
+from sims_mod_manager.gui.install_worker import DownloadAndInstallWorker
 
 
 class FindTab(QWidget):
@@ -88,14 +87,11 @@ class FindTab(QWidget):
             )
             return
 
-        try:
-            downloaded_path = download_file(url, self._context.staging_dir)
-        except DownloadError as exc:
-            self._status_label.setText(str(exc))
-            return
-
-        self._worker = InstallWorker(self._context.install_coordinator, downloaded_path)
+        self._worker = DownloadAndInstallWorker(
+            self._context.install_coordinator, url, self._context.staging_dir
+        )
         self._worker.succeeded.connect(self._on_install_succeeded)
+        self._worker.download_failed.connect(self._on_download_failed)
         self._worker.failed.connect(self._on_install_failed)
         self._go_button.setEnabled(False)
         self._progress_bar.show()
@@ -105,6 +101,11 @@ class FindTab(QWidget):
         self._progress_bar.hide()
         self._go_button.setEnabled(True)
         self._status_label.setText(_describe_install_result(result))
+
+    def _on_download_failed(self, message: str) -> None:
+        self._progress_bar.hide()
+        self._go_button.setEnabled(True)
+        self._status_label.setText(message)
 
     def _on_install_failed(self, message: str) -> None:
         self._progress_bar.hide()
