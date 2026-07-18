@@ -1,6 +1,7 @@
 """Local SQLite-backed record of installed mod files, used for duplicate
 detection and the in-app activity log."""
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,11 +10,14 @@ class ModStore:
     def __init__(self, db_path: Path):
         # check_same_thread=False: installs now run on a background
         # QThread (see gui/install_worker.py) while this connection was
-        # created on the GUI thread. Safe because only one install ever
-        # runs at a time -- find_tab.py/inbox_tab.py disable their trigger
-        # button while a worker is active, so access is always sequential,
-        # never concurrent, across threads.
+        # created on the GUI thread. Since installs no longer block the GUI
+        # thread, the GUI thread (e.g. ActivityTab.refresh(), triggered from
+        # showEvent()) can genuinely race the install worker thread against
+        # this same connection. self._lock below serializes all access
+        # across threads so that race can't cause sqlite3.OperationalError
+        # ("database locked") or connection-state corruption.
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._lock = threading.Lock()
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS installed_files (
@@ -33,38 +37,42 @@ class ModStore:
         self._conn.commit()
 
     def is_duplicate(self, file_hash: str) -> bool:
-        cursor = self._conn.execute(
-            "SELECT 1 FROM installed_files WHERE file_hash = ? LIMIT 1", (file_hash,)
-        )
-        return cursor.fetchone() is not None
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT 1 FROM installed_files WHERE file_hash = ? LIMIT 1", (file_hash,)
+            )
+            return cursor.fetchone() is not None
 
     def record_install(
         self, source: str, filename: str, category: str, file_hash: str, installed_path: str
     ) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO installed_files
-                (file_hash, filename, category, source, installed_path, installed_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                file_hash,
-                filename,
-                category,
-                source,
-                installed_path,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO installed_files
+                    (file_hash, filename, category, source, installed_path, installed_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    file_hash,
+                    filename,
+                    category,
+                    source,
+                    installed_path,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            self._conn.commit()
 
     def get_activity_log(self) -> list[dict]:
-        cursor = self._conn.execute(
-            "SELECT filename, category, source, installed_path, installed_at "
-            "FROM installed_files ORDER BY installed_at DESC"
-        )
-        columns = [description[0] for description in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT filename, category, source, installed_path, installed_at "
+                "FROM installed_files ORDER BY installed_at DESC"
+            )
+            columns = [description[0] for description in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()

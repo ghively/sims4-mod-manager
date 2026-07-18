@@ -61,3 +61,38 @@ def test_store_usable_from_a_different_thread(tmp_path):
     assert errors == []
     assert store.is_duplicate("fromthread") is True
     store.close()
+
+
+def test_store_survives_concurrent_writes_from_many_threads(tmp_path):
+    import threading
+
+    store = ModStore(tmp_path / "store.db")
+    errors = []
+    thread_count = 8
+
+    def _record(index: int) -> None:
+        try:
+            store.record_install(
+                source="C:/Downloads/mod.zip",
+                filename=f"mod{index}.package",
+                category="CAS",
+                file_hash=f"hash{index}",
+                installed_path=f"C:/Mods/CAS/mod{index}.package",
+            )
+        except Exception as exc:  # sqlite3.OperationalError ("database is locked")
+            # without a lock serializing access, or connection corruption
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_record, args=(i,)) for i in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert errors == []
+    log = store.get_activity_log()
+    assert len(log) == thread_count
+    assert {entry["filename"] for entry in log} == {
+        f"mod{i}.package" for i in range(thread_count)
+    }
+    store.close()

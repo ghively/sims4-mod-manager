@@ -96,6 +96,9 @@ class InboxTab(QWidget):
         self._progress_bar.hide()
         self._install_button.setEnabled(True)
 
+    def is_install_running(self) -> bool:
+        return self._worker is not None and self._worker.isRunning()
+
     def shutdown(self) -> None:
         """Stop the background watcher thread cleanly.
 

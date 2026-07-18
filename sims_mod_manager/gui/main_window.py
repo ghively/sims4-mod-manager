@@ -71,7 +71,9 @@ class MainWindow(QMainWindow):
         )
 
         tabs = QTabWidget()
-        tabs.addTab(FindTab(context), "Find")
+        find_tab = FindTab(context)
+        tabs.addTab(find_tab, "Find")
+        self._find_tab = find_tab
         inbox_tab = InboxTab(context)
         tabs.addTab(inbox_tab, "Inbox")
         self._inbox_tab = inbox_tab
@@ -81,6 +83,20 @@ class MainWindow(QMainWindow):
         self._maybe_show_settings_reminder()
 
     def closeEvent(self, event) -> None:
+        # Guard against tearing down the window (and its tabs) while an
+        # InstallWorker QThread is still running in the background --
+        # destroying a running QThread is a documented Qt crash hazard, and
+        # installs no longer block the GUI thread so this is now reachable.
+        if self._find_tab.is_install_running() or self._inbox_tab.is_install_running():
+            QMessageBox.information(
+                self,
+                "Install in progress",
+                "A mod install is still in progress. Please wait a moment "
+                "for it to finish before closing.",
+            )
+            event.ignore()
+            return
+
         # InboxTab is a child widget (added via QTabWidget.addTab), and Qt
         # only delivers closeEvent to the top-level window being closed --
         # never to child widgets. So we reach into the tab explicitly here

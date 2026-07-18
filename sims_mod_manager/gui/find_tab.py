@@ -113,6 +113,9 @@ class FindTab(QWidget):
             f"Something went wrong installing this file: {message}"
         )
 
+    def is_install_running(self) -> bool:
+        return self._worker is not None and self._worker.isRunning()
+
 
 def _describe_install_result(result) -> str:
     if result.errors:
