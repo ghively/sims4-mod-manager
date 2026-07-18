@@ -1,4 +1,4 @@
-"""Top-level window: two tabs sharing one AppContext, plus the one-time
+"""Top-level window: tabs sharing one AppContext, plus the one-time
 settings toggle and the once-per-session backup safety net."""
 from dataclasses import dataclass
 from pathlib import Path
