@@ -49,21 +49,44 @@ def test_disabled_values_get_flipped_on(tmp_path):
 
 
 def test_preserves_crlf_line_endings(tmp_path):
-    """Verify that rewritten lines preserve the original CRLF line endings."""
+    """Verify that rewritten lines preserve the original CRLF line endings.
+
+    Writes the input with newline="" so the on-disk bytes are unambiguously
+    \\r\\n regardless of platform, and reads the output back with read_bytes()
+    so the assertion sidesteps any text-mode newline translation entirely.
+    This makes the test genuinely platform-independent: it would fail if the
+    line-ending preservation logic regressed, unlike a text-mode round trip
+    which can be silently "fixed" by the OS's own newline coercion.
+    """
     options_ini_path = tmp_path / "Options.ini"
     original_content = "scriptmodsenabled=0\r\nmodsdisabled=1\r\nothersetting=5\r\n"
-    # Write with newline="" to prevent Python from translating \r\n to \n on Windows
-    with open(options_ini_path, "w", encoding="utf-8", newline="") as f:
-        f.write(original_content)
+    options_ini_path.write_text(original_content, encoding="utf-8", newline="")
 
     result = enable_mods_and_script_mods(options_ini_path)
 
     assert result == SettingsToggleResult.APPLIED
-    # Read with newline="" to prevent translation and see actual line endings
-    with open(options_ini_path, "r", encoding="utf-8", newline="") as f:
-        updated = f.read()
+    output_bytes = options_ini_path.read_bytes()
+    assert output_bytes == (
+        b"scriptmodsenabled=1\r\nmodsdisabled=0\r\nothersetting=5\r\n"
+    )
 
-    # Verify the rewritten lines have \r\n, not just \n
-    assert "scriptmodsenabled=1\r\n" in updated
-    assert "modsdisabled=0\r\n" in updated
-    assert "othersetting=5\r\n" in updated
+
+def test_preserves_lf_only_line_endings(tmp_path):
+    """Verify that LF-only files are not force-converted to CRLF.
+
+    This is the mirror-image bug: a naive fix could preserve CRLF but always
+    emit CRLF regardless of what the original file used. Writing with
+    newline="" and asserting on read_bytes() proves the output stays
+    byte-for-byte LF-only.
+    """
+    options_ini_path = tmp_path / "Options.ini"
+    original_content = "scriptmodsenabled=0\nmodsdisabled=1\nothersetting=5\n"
+    options_ini_path.write_text(original_content, encoding="utf-8", newline="")
+
+    result = enable_mods_and_script_mods(options_ini_path)
+
+    assert result == SettingsToggleResult.APPLIED
+    output_bytes = options_ini_path.read_bytes()
+    assert output_bytes == (
+        b"scriptmodsenabled=1\nmodsdisabled=0\nothersetting=5\n"
+    )

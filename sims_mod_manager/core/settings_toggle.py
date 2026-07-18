@@ -21,7 +21,13 @@ def enable_mods_and_script_mods(options_ini_path: Path) -> SettingsToggleResult:
     if not options_ini_path.exists():
         return SettingsToggleResult.NEEDS_MANUAL_FALLBACK
 
-    lines = options_ini_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    # newline="" disables Python's universal-newline translation on read so
+    # \r\n, \n, and \r terminators survive exactly as they appear on disk
+    # (Path.read_text() doesn't accept newline= until Python 3.13, so we go
+    # through open() directly to get this on all supported versions).
+    with options_ini_path.open("r", encoding="utf-8", newline="") as f:
+        content = f.read()
+    lines = content.splitlines(keepends=True)
 
     found_script_mods = False
     found_mods_disabled = False
@@ -52,5 +58,5 @@ def enable_mods_and_script_mods(options_ini_path: Path) -> SettingsToggleResult:
     if not changed:
         return SettingsToggleResult.ALREADY_ENABLED
 
-    options_ini_path.write_text("".join(new_lines), encoding="utf-8")
+    options_ini_path.write_text("".join(new_lines), encoding="utf-8", newline="")
     return SettingsToggleResult.APPLIED
