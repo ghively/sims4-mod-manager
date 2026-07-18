@@ -11,6 +11,12 @@ def backup_mod_folders(sims4_dir: Path, backup_root: Path) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = backup_root / f"backup-{timestamp}.zip"
 
+    # Handle collision: if file exists, append incrementing counter
+    counter = 2
+    while backup_path.exists():
+        backup_path = backup_root / f"backup-{timestamp} ({counter}).zip"
+        counter += 1
+
     with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for folder_name in _BACKUP_FOLDERS:
             folder_path = sims4_dir / folder_name
