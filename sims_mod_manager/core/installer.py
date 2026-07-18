@@ -22,6 +22,26 @@ class InstallResult:
     errors: list[str] = field(default_factory=list)
 
 
+def _resolve_collision(target_path: Path) -> Path:
+    """Return a path guaranteed not to already exist on disk.
+
+    If `target_path` is free, it's returned unchanged. Otherwise this is a
+    genuine filename collision between two different files (content dedupe
+    already ruled out a content match), so a counter is appended before the
+    suffix until an unused name is found -- never silently overwrite."""
+    if not target_path.exists():
+        return target_path
+
+    counter = 2
+    while True:
+        candidate = target_path.with_name(
+            f"{target_path.stem} ({counter}){target_path.suffix}"
+        )
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 def install_mod_file(
     source_path: Path, mods_dir: Path, store: ModStore, staging_dir: Path
 ) -> InstallResult:
@@ -55,7 +75,7 @@ def install_mod_file(
         category = categorize_file(mod_file)
         category_dir = mods_dir / category
         category_dir.mkdir(parents=True, exist_ok=True)
-        target_path = category_dir / mod_file.name
+        target_path = _resolve_collision(category_dir / mod_file.name)
         shutil.copy2(mod_file, target_path)
 
         store.record_install(

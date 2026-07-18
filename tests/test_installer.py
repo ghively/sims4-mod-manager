@@ -83,6 +83,44 @@ def test_unrecognized_file_type_produces_error(tmp_path):
     store.close()
 
 
+def test_filename_collision_between_different_files_is_disambiguated_not_overwritten(tmp_path):
+    downloads_dir = tmp_path / "downloads"
+    downloads_dir.mkdir()
+
+    first_zip = downloads_dir / "hair_a.zip"
+    _make_zip(first_zip, {"HairModA/somefile.package": "content a"})
+
+    second_zip = downloads_dir / "hair_b.zip"
+    _make_zip(second_zip, {"HairModB/somefile.package": "content b"})
+
+    mods_dir = tmp_path / "Mods"
+    staging_dir = tmp_path / "staging"
+    store = ModStore(tmp_path / "store.db")
+
+    first = install_mod_file(first_zip, mods_dir, store, staging_dir)
+    second = install_mod_file(second_zip, mods_dir, store, staging_dir)
+
+    assert len(first.installed) == 1
+    original_path = first.installed[0]
+    assert original_path.name == "somefile.package"
+    assert original_path.parent == mods_dir / "CAS"
+
+    assert len(second.installed) == 1
+    disambiguated_path = second.installed[0]
+    assert disambiguated_path.name == "somefile (2).package"
+    assert disambiguated_path.parent == mods_dir / "CAS"
+
+    assert first.duplicates == []
+    assert second.duplicates == []
+
+    assert original_path.exists()
+    assert disambiguated_path.exists()
+    assert original_path.read_bytes() == b"content a"
+    assert disambiguated_path.read_bytes() == b"content b"
+
+    store.close()
+
+
 def test_archive_with_no_mod_files_produces_error(tmp_path):
     downloads_dir = tmp_path / "downloads"
     downloads_dir.mkdir()
