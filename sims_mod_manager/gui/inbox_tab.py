@@ -7,12 +7,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from sims_mod_manager.core.watcher import DownloadsWatcher
+from sims_mod_manager.gui.install_worker import InstallWorker
 
 _PATH_DATA_ROLE = 1000
 
@@ -25,17 +27,25 @@ class InboxTab(QWidget):
         self._context = context
 
         self._list = QListWidget()
-        install_button = QPushButton("Install selected")
-        install_button.clicked.connect(self._on_install_clicked)
+        self._install_button = QPushButton("Install selected")
+        self._install_button.clicked.connect(self._on_install_clicked)
         self._status_label = QLabel("")
         self._status_label.setWordWrap(True)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 0)  # indeterminate/busy indicator
+        self._progress_bar.hide()
+
+        self._worker = None
+        self._pending_item = None
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel("Files ready to install:"))
         layout.addWidget(self._list)
         button_row = QHBoxLayout()
-        button_row.addWidget(install_button)
+        button_row.addWidget(self._install_button)
         layout.addLayout(button_row)
+        layout.addWidget(self._progress_bar)
         layout.addWidget(self._status_label)
         self.setLayout(layout)
 
@@ -55,13 +65,17 @@ class InboxTab(QWidget):
         if item is None:
             return
         source_path = Path(item.data(_PATH_DATA_ROLE))
-        try:
-            result = self._context.install_coordinator.install(source_path)
-        except Exception as exc:
-            self._status_label.setText(
-                f"Something went wrong installing this file: {exc}"
-            )
-            return
+
+        self._pending_item = item
+        self._worker = InstallWorker(self._context.install_coordinator, source_path)
+        self._worker.succeeded.connect(self._on_install_succeeded)
+        self._worker.failed.connect(self._on_install_failed)
+        self._install_button.setEnabled(False)
+        self._progress_bar.show()
+        self._worker.start()
+
+    def _on_install_succeeded(self, result) -> None:
+        item = self._pending_item
         if result.errors:
             self._status_label.setText("; ".join(result.errors))
         elif result.installed:
@@ -70,6 +84,17 @@ class InboxTab(QWidget):
         elif result.duplicates:
             self._status_label.setText("Already installed — skipped duplicate.")
             self._list.takeItem(self._list.row(item))
+        self._pending_item = None
+        self._progress_bar.hide()
+        self._install_button.setEnabled(True)
+
+    def _on_install_failed(self, message: str) -> None:
+        self._status_label.setText(
+            f"Something went wrong installing this file: {message}"
+        )
+        self._pending_item = None
+        self._progress_bar.hide()
+        self._install_button.setEnabled(True)
 
     def shutdown(self) -> None:
         """Stop the background watcher thread cleanly.

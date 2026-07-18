@@ -7,7 +7,13 @@ from pathlib import Path
 
 class ModStore:
     def __init__(self, db_path: Path):
-        self._conn = sqlite3.connect(db_path)
+        # check_same_thread=False: installs now run on a background
+        # QThread (see gui/install_worker.py) while this connection was
+        # created on the GUI thread. Safe because only one install ever
+        # runs at a time -- find_tab.py/inbox_tab.py disable their trigger
+        # button while a worker is active, so access is always sequential,
+        # never concurrent, across threads.
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS installed_files (

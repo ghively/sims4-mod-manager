@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -19,6 +20,7 @@ from sims_mod_manager.core.search_launcher import (
     SITE_MODTHESIMS,
     open_search,
 )
+from sims_mod_manager.gui.install_worker import InstallWorker
 
 
 class FindTab(QWidget):
@@ -37,11 +39,17 @@ class FindTab(QWidget):
 
         self._link_box = QLineEdit()
         self._link_box.setPlaceholderText("Or paste a mod link here...")
-        go_button = QPushButton("Go")
-        go_button.clicked.connect(self._on_link_submitted)
+        self._go_button = QPushButton("Go")
+        self._go_button.clicked.connect(self._on_link_submitted)
 
         self._status_label = QLabel("")
         self._status_label.setWordWrap(True)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 0)  # indeterminate/busy indicator
+        self._progress_bar.hide()
+
+        self._worker = None
 
         search_row = QHBoxLayout()
         search_row.addWidget(self._search_box)
@@ -50,11 +58,12 @@ class FindTab(QWidget):
 
         link_row = QHBoxLayout()
         link_row.addWidget(self._link_box)
-        link_row.addWidget(go_button)
+        link_row.addWidget(self._go_button)
 
         layout = QVBoxLayout()
         layout.addLayout(search_row)
         layout.addLayout(link_row)
+        layout.addWidget(self._progress_bar)
         layout.addWidget(self._status_label)
         layout.addStretch()
         self.setLayout(layout)
@@ -85,14 +94,24 @@ class FindTab(QWidget):
             self._status_label.setText(str(exc))
             return
 
-        try:
-            result = self._context.install_coordinator.install(downloaded_path)
-        except Exception as exc:
-            self._status_label.setText(
-                f"Something went wrong installing this file: {exc}"
-            )
-            return
+        self._worker = InstallWorker(self._context.install_coordinator, downloaded_path)
+        self._worker.succeeded.connect(self._on_install_succeeded)
+        self._worker.failed.connect(self._on_install_failed)
+        self._go_button.setEnabled(False)
+        self._progress_bar.show()
+        self._worker.start()
+
+    def _on_install_succeeded(self, result) -> None:
+        self._progress_bar.hide()
+        self._go_button.setEnabled(True)
         self._status_label.setText(_describe_install_result(result))
+
+    def _on_install_failed(self, message: str) -> None:
+        self._progress_bar.hide()
+        self._go_button.setEnabled(True)
+        self._status_label.setText(
+            f"Something went wrong installing this file: {message}"
+        )
 
 
 def _describe_install_result(result) -> str:

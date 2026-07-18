@@ -34,3 +34,30 @@ def test_activity_log_contains_recorded_install(tmp_path):
     assert log[0]["filename"] == "mod.package"
     assert log[0]["category"] == "CAS"
     store.close()
+
+
+def test_store_usable_from_a_different_thread(tmp_path):
+    import threading
+
+    store = ModStore(tmp_path / "store.db")
+    errors = []
+
+    def _use_from_thread():
+        try:
+            store.record_install(
+                source="C:/Downloads/mod.zip",
+                filename="mod.package",
+                category="CAS",
+                file_hash="fromthread",
+                installed_path="C:/Mods/CAS/mod.package",
+            )
+        except Exception as exc:  # sqlite3.ProgrammingError if check_same_thread wasn't disabled
+            errors.append(exc)
+
+    thread = threading.Thread(target=_use_from_thread)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert errors == []
+    assert store.is_duplicate("fromthread") is True
+    store.close()
