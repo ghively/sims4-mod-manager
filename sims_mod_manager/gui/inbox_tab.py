@@ -71,6 +71,20 @@ class InboxTab(QWidget):
             self._status_label.setText("Already installed — skipped duplicate.")
             self._list.takeItem(self._list.row(item))
 
+    def shutdown(self) -> None:
+        """Stop the background watcher thread cleanly.
+
+        `MainWindow` calls this from its own `closeEvent`, since Qt only
+        delivers `closeEvent` to the top-level window being closed -- never
+        to child widgets nested inside it (like this tab, added via
+        `QTabWidget.addTab`). See `MainWindow.closeEvent`.
+        """
+        self._watcher.stop()
+
     def closeEvent(self, event) -> None:
+        # Unreachable in the real app (InboxTab is always a child widget,
+        # and child widgets never receive closeEvent), but kept for
+        # correctness if InboxTab is ever used as a top-level window in
+        # isolation (e.g. a test).
         self._watcher.stop()
         super().closeEvent(event)

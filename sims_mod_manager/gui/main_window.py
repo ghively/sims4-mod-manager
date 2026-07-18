@@ -69,10 +69,21 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(FindTab(context), "Find")
-        tabs.addTab(InboxTab(context), "Inbox")
+        inbox_tab = InboxTab(context)
+        tabs.addTab(inbox_tab, "Inbox")
+        self._inbox_tab = inbox_tab
         self.setCentralWidget(tabs)
 
         self._maybe_show_settings_reminder()
+
+    def closeEvent(self, event) -> None:
+        # InboxTab is a child widget (added via QTabWidget.addTab), and Qt
+        # only delivers closeEvent to the top-level window being closed --
+        # never to child widgets. So we reach into the tab explicitly here
+        # to stop its background watcher thread cleanly whenever the real
+        # top-level window closes.
+        self._inbox_tab.shutdown()
+        super().closeEvent(event)
 
     def _maybe_show_settings_reminder(self) -> None:
         result = enable_mods_and_script_mods(config.get_options_ini_path())
