@@ -22,8 +22,12 @@ def download_file(url: str, dest_dir: Path) -> Path:
     except requests.RequestException as exc:
         raise DownloadError(f"Could not download {url}: {exc}") from exc
 
-    with dest_path.open("wb") as handle:
-        for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
-            handle.write(chunk)
+    try:
+        with dest_path.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
+                handle.write(chunk)
+    except (requests.RequestException, OSError) as exc:
+        dest_path.unlink(missing_ok=True)
+        raise DownloadError(f"Download of {url} failed while streaming: {exc}") from exc
 
     return dest_path
