@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A desktop app that removes the tedious parts of installing Sims 4 mods/CC for a non-technical user (my wife), and gives her one place to search for mods across the sites she actually uses instead of hunting manually. It does not attempt to fully automate mod discovery/download end-to-end — most mod sites block automated scraping and downloading via ToS and anti-bot measures, so the app leans on the browser for actual downloading and automates everything after that point.
+A desktop app that removes the tedious parts of installing Sims 4 mods/CC for a non-technical user, and gives them one place to search for mods across the sites they actually use instead of hunting manually. It does not attempt to fully automate mod discovery/download end-to-end — most mod sites block automated scraping and downloading via ToS and anti-bot measures, so the app leans on the browser for actual downloading and automates everything after that point.
 
 ## Background
 
@@ -18,7 +18,7 @@ The fiddly, error-prone parts are: enforcing the one-folder-deep rule, organizin
 
 ## Goals
 
-- One desktop app my wife can double-click to open — no terminal, no scripts.
+- One desktop app the user can double-click to open — no terminal, no scripts.
 - Search across ModTheSims and CurseForge from one search box.
 - Turn "I downloaded a zip" into "it's correctly installed and categorized" with minimal clicks.
 - Handle the one-time game-settings toggle automatically where possible.
@@ -44,14 +44,14 @@ Two tabs share one install engine underneath:
 
 ## Find tab
 
-- **Search box** with a site toggle (ModTheSims / CurseForge / both). Since neither site has an automation-friendly path in v1, submitting a search opens pre-filled search-results pages for the selected site(s) in her default browser (deep-linked to each site's own search URL format). She browses and downloads there as normal.
+- **Search box** with a site toggle (ModTheSims / CurseForge / both). Since neither site has an automation-friendly path in v1, submitting a search opens pre-filled search-results pages for the selected site(s) in the user's default browser (deep-linked to each site's own search URL format). The user browses and downloads there as normal.
 - **Paste-a-link box**: a single field for any URL, with three-way routing on submit:
   1. A direct file URL (ends in `.zip`/`.rar`/`.package`/`.ts4script`) → downloaded directly by the app, then handed to the install pipeline.
-  2. Anything else (a ModTheSims or CurseForge mod page, etc.) → opened in her default browser, with an in-app note: "Opened in your browser — download it there and I'll catch it automatically."
+  2. Anything else (a ModTheSims or CurseForge mod page, etc.) → opened in the user's default browser, with an in-app note: "Opened in your browser — download it there and I'll catch it automatically."
 
 ## Inbox tab & install pipeline
 
-**Downloads watcher**: while the app is open, a background thread watches her Downloads folder for new files matching mod patterns (`.zip`, `.rar`, `.package`, `.ts4script`). Matches appear as cards in the Inbox: filename, detected type, "ready to install." Nothing installs until she acts on a card (or a direct-file-link install completes) — the watcher only surfaces candidates, it never writes into `Mods` on its own.
+**Downloads watcher**: while the app is open, a background thread watches the user's Downloads folder for new files matching mod patterns (`.zip`, `.rar`, `.package`, `.ts4script`). Matches appear as cards in the Inbox: filename, detected type, "ready to install." Nothing installs until the user acts on a card (or a direct-file-link install completes) — the watcher only surfaces candidates, it never writes into `Mods` on its own.
 
 **Install pipeline** (per item):
 
@@ -63,12 +63,12 @@ Two tabs share one install engine underneath:
 
 **Backups**: before the first install pipeline run of each app session, zip-copy `Mods`, `Saves`, and `Tray` (under `Documents\Electronic Arts\The Sims 4`) to a timestamped backup folder.
 
-**Settings toggle**: on first run, attempt to locate the game's `Options.ini` and set the custom-content/script-mods flags directly, so she never has to open the in-game menu. The exact key names get confirmed against a real install during implementation. If the file can't be found or the edit can't be made reliably, fall back to a one-time on-screen instruction instead of failing silently.
+**Settings toggle**: on first run, attempt to locate the game's `Options.ini` and set the custom-content/script-mods flags directly, so the user never has to open the in-game menu. The exact key names get confirmed against a real install during implementation. If the file can't be found or the edit can't be made reliably, fall back to a one-time on-screen instruction instead of failing silently.
 
 ## Error handling
 
 - **Extraction failure** (corrupt/password-protected archive, unknown format): item stays in the Inbox flagged "couldn't open — check the file." Never silently dropped.
-- **Ambiguous categorization**: goes to `Mods/Uncategorized`; nothing is lost, she can move it manually.
+- **Ambiguous categorization**: goes to `Mods/Uncategorized`; nothing is lost, the user can move it manually.
 - **Duplicate detected**: skipped and logged as "already installed," never silently overwritten.
 - **`Options.ini` not found or not editable**: falls back to the one-time on-screen reminder; the app doesn't crash or fail silently.
 - **Downloads watcher false positive** (a non-mod zip matched the pattern): worst case it sits unactioned in the Inbox — nothing writes to `Mods` until a card is acted on, and the session backup is a second safety net regardless.
